@@ -1,35 +1,34 @@
+#include <string.h>
+
+
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
 
 }
 
+bool checkSum(char* data){
+  
+}
+
 void loop() {
   // put your main code here, to run repeatedly:
 
-  char data[20];
+  char data[10];
+  int input[6];
+  char recv[20];
+  char inverted[16];
   if(Serial.available()){
     /*This code reads data sent from laptop
      * /
      * 
       */
-      size_t lengthOfData = Serial.readBytes(data,20);
-      Serial.println();
-      Serial.print(lengthOfData);
-      Serial.println();
+      size_t lengthOfData = Serial.readBytes(data,10);
       for (int i=0;i<lengthOfData;i++){
-        Serial.print(data[i]); 
-      
-      }
-      int count = 0;
-      count++;
-      Serial.println();
-      int remaining = 20 - lengthOfData;
-      for (int i=lengthOfData;i<20;i++){
-        data[i]='0';
+        //Serial.println(data[i]);
       }
       Serial.print(data);
- 
+
       
     }
   
