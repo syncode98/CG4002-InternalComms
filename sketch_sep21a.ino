@@ -33,7 +33,7 @@ void setup() {
 
 
 }
-void sendData(int timeout) {
+void sendData(uint8_t *arr) {
   //https://arduino.stackexchange.com/questions/72138/send-structure-through-serial
   //calculate checkSum for the packet
 
@@ -44,12 +44,12 @@ void sendData(int timeout) {
   int checksum = 0;
 
 
-  pack1.rawX = rand() % 255;
-  pack1.rawY= rand() % 255;
-  pack1.rawZ = rand() % 255;
-  pack1.accX = rand() % 255;
-  pack1.accY = rand() % 255;
-  pack1.accZ = rand() % 255;
+  pack1.rawX = *arr; arr++;
+  pack1.rawY = *arr; arr++;
+  pack1.rawZ = *arr; arr++;
+  pack1.accX = *arr; arr++;
+  pack1.accY = *arr; arr++;
+  pack1.accZ = *arr;
 
 
 
@@ -60,7 +60,7 @@ void sendData(int timeout) {
   }
 
   //Retrieve the last 8 bits
-  checksum &= 0XFF;
+  //checksum &= 0XFF;
   pack1.checksum = checksum;
 
 
@@ -70,40 +70,62 @@ void sendData(int timeout) {
 
 }
 
+void sensorData(uint8_t* arr) {
+
+  //If its IMU,all 6 values need to be not random
+  //If its IR, one value will be 1 and the rest will be 0
+  //for (int i = 0; i < 5; i++) {
+  //  *arr = rand() % 255;
+  //  arr++;
+  //}
+  *arr = 1;
+   
+}
+
+int trigger(){
+
+  return (rand()%2);
+}
 void loop() {
   unsigned long current = millis();
   uint8_t data[20];
+  uint8_t sensor[6];
   uint8_t temp;
   int index = 0;
   int check = 0;
   size_t len = 0;
-  int sensor = 0;
+
+  //collects data from sensors if active
+  if(trigger() == 1){
+    sensorData(sensor);
+  }
   
+  //Reads the serial data and acts accordingly
   if (Serial.available()) {
 
     receivedData = millis();
 
-    while (Serial.available()) {
-
-       len = Serial.readBytes(data,20);
-    }
-  }
    
-  
+
+    len = Serial.readBytes(data, 20);
+    
+  }
+
+
   delay(500);
 
-  
-  if (len>0) {
+
+  if (len > 0) {
 
 
-    
+
     if (data[0] == 170 && data[2] == 1 && data[19] == 171 ) {
-      
+
       Serial.write((uint8_t *) &ACK, sizeof(ACK));
       Serial.flush();
     }
     else if (data[0] == 170 && data[2] == 3 && data[19] == 169) {
-      sendData(0);
+      sendData(sensor);
       Serial.flush();
 
     }
