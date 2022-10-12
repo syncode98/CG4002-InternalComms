@@ -1,4 +1,4 @@
-
+import queue
 from bluepy import btle
 from struct import *
 import logging
@@ -28,67 +28,24 @@ RESETACK = bytes(
 shoot = True
 count = 0
 # create a queue to be passed to the relevant beetles
-man = Manager()
-queue = man.Queue()
+#man = Manager()
+queue = queue.Queue()
 
-# Addresses of the beetles, along with the queues
-# Addresses = {
-#     'IMU1': ('d0:39:72:bf:c3:89', queue),
-#     "GUN": ('d0:39:72:bf:bf:9c', queue),
-#     'GUN2' : 'd0:39:72:bf:c8:ff'
-#     'SHIELD': ('d0:39:72:bf:c3:b0', queue)
-#     #'IMU2':('d0:39:72:bf:c8:e0',queue)
-#       VEST_BLUE : c4:BE:84:20:19:1a
-
-
-# }
 Addresses = {
 
-    # 'IMU2':'d0:39:72:bf:c8:e0',
-    # 'GUN_BLUE' : 'd0:39:72:bf:c8:ff',
-    # 'VEST_BLUE' : 'c4:be:84:20:19:1a'
+     'IMU':'d0:39:72:bf:c8:e0',
+     'GUN' : 'd0:39:72:bf:c8:ff',
+     'VEST' : 'c4:be:84:20:19:1a'
 
     
-    "GUN": 'd0:39:72:bf:bf:9c','VEST': 'd0:39:72:bf:c3:b0',
-    'IMU1': 'd0:39:72:bf:c3:89'
+    #"GUN": 'd0:39:72:bf:bf:9c',
+    #'VEST': 'd0:39:72:bf:c3:b0',
+    #'IMU1': 'd0:39:72:bf:c3:89'
 }
 
 devices = []
 disconnected = []
 handshaked = []
-
-
-class PlayerStat():
-
-    def __init__(self, name):
-        self.name = name
-        self.hp = 100
-        self.bullets = 100
-        self.action = "NA"
-        self.bullet_hit = "No"
-        self.grenades = 1
-        self.shield_health = 10
-        self.shield_timer = 10
-        self.shield_broke = "No"
-        self.num_kills = 0
-        self.num_shield = 0
-        self.kills = 0
-        self.killed = 0
-
-    def reset(self):
-        self.hp = 100
-        self.bullets = 6
-        self.action = "NA"
-        self.bullet_hit = "No"
-        self.grenades = 1
-        self.shield_health = 10
-        self.shield_timer = 10
-        self.shield_broke = "No"
-        self.num_kills = 0
-        self.num_shield = 0
-
-
-player1 = PlayerStat("player1")
 
 recv = list()
 json_format_IMU = {"P": 1, "D": "IMU", "V": recv}
@@ -112,6 +69,7 @@ class Device():
         self.count = 0
         self.queue = queue
         self.sendCount = 1
+
     def sendDataToClient(self, recv):
         print(recv)
         if ('IMU' in self.name):
@@ -148,8 +106,8 @@ class Device():
         print()
 
         count = 0
-
-        while (count < 5 and self.start == 0 and self.disconnect == 0):
+        
+        while (count < 5 and self.disconnect == 0 and self.start == 0):
             try:
                 self.characteristic.write(SYN)
                 self.peripheral.waitForNotifications(3.0)
@@ -160,7 +118,10 @@ class Device():
                 else:
                     print(self.name + ":Successful handshake")
             except Exception as e:
-                count = self.diconnect = 1
+                print(e)
+                count = 5
+                
+                
 
         while (count > 0 and self.start == 0):
             try:
@@ -215,7 +176,7 @@ class MyDelegate(btle.DefaultDelegate):
     def sendACK(self, count):
         if ('GUN' in self.beetle.name or 'VEST' in self.beetle.name):
             SYNACK_values[1] = count
-            #print("Sending ACK NO:" + str(SYNACK_values[1]))
+            print("Sending ACK NO:" + str(SYNACK_values[1]))
             self.beetle.characteristic.write(bytes(SYNACK_values))
 
     def shiftBuffer(self, newIndex):
@@ -265,9 +226,10 @@ class MyDelegate(btle.DefaultDelegate):
                 #     self.sendACK(self.countPacket)
 
                 #elif (self.countPacket % 10 != 0 and self.count == 0 or self.countPacket == 0):
-
+                
                 self.seq.append(self.countPacket)
                 self.countPacket += 1
+                print(self.countPacket)
                 self.sendACK(self.countPacket)
             #else:
                 #print(self.beetle.name +":" + str(data[3]) +":exists")
@@ -318,13 +280,16 @@ class MyDelegate(btle.DefaultDelegate):
 
             else:
                 
-
+                print(data)
                 if (self.verifyData(list(data)) == True):
                     self.processData(data)
                     self.retrPacket += 1
 
                 else:
-                    #print(self.beetle.name+":"+str(data))
+                    # print(self.beetle.name+":"+str(data))
+                    # print(data[0])
+                    # print(data[1])
+                    # print(len(data))
                     if (len(self.buffer) == 0):
                         self.buffer.extend(data)
                         # print(self.buffer)
@@ -401,8 +366,8 @@ def connect(name):
     while (connect == 0):
         print(name + ":Trying to connect")
         try:
-            currentBeetle = btle.Peripheral()
-            currentBeetle.connect(addr)
+            currentBeetle = btle.Peripheral(addr)
+            #currentBeetle.connect(addr)
 
             print("Device Connected")
             connect = 1
@@ -463,15 +428,51 @@ def start(beetle):
             beetle.start = 0
 
         except Exception as e:
-            print(1)
+            
             print(e)
 
     print("End of transmission")
     beetle.peripheral.disconnect()
 
+
+def firstHandShake(beetle):
+
+
+    while beetle.start == 0:
+        try:
+            if beetle.disconnect == 1:
+                try:
+                    beetle.peripheral.connect(beetle.ADDRESS)
+                    beetle.disconnect = 0
+
+                    print("Reconnected")
+                except Exception as e:
+                    print(e)
+
+                    time.sleep(1)
+
+            else:
+
+                while beetle.start == 0 and beetle.disconnect == 0:
+                    beetle.handShakeWithBeetle()
+
+              
+
+        except btle.BTLEDisconnectError as c:
+            print(beetle.name + ":disconnected")
+            beetle.disconnect = 1
+            beetle.start = 0
+
+        except Exception as e:
+           
+            print(e)
+
+ 
+  
+
 # connecting to ultra96
 class UltraClient(threading.Thread):
-    def __init__(self, user, passw,queue):
+    def __init__(self, user, passw,port,queue):
         self.ip_addr = '192.168.95.244'
         self.buff_size = 256
         self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -479,6 +480,7 @@ class UltraClient(threading.Thread):
         self.passw = passw
         self.is_start = threading.Event()
         self.queue = queue
+        self.port = port
 
     # sshtunneling into sunfire
     def start_tunnel(self):
@@ -501,10 +503,10 @@ class UltraClient(threading.Thread):
             # ssh to ultra96
             ssh_address_or_host = ('localhost', tunnel1.local_bind_port),
             # local host
-            remote_bind_address=('127.0.0.1', 8086),
+            remote_bind_address=('127.0.0.1', self.port),
             ssh_username = 'xilinx',
             ssh_password = 'xilinx',
-            local_bind_address = ('127.0.0.1', 8086), #localhost to bind it to
+            local_bind_address = ('127.0.0.1', self.port), #localhost to bind it to
             block_on_close = False
             )
         tunnel2.start()
@@ -542,7 +544,7 @@ def sendDataClient(ultra96):
             
         except ConnectionRefusedError:
             print("connection refused")
-            # ultra96.is_start.clear()
+            ultra96.is_start.clear()
         except IOError as e:
             print(str(e))
             # break
@@ -556,28 +558,25 @@ def sendDataClient(ultra96):
 
 def main():
 
-    if len(sys.argv) != 3:
-        print("input sunfire username and password")
-        sys.exit()
+    # if len(sys.argv) != 4:
+    #     print("input sunfire username and password, port")
+    #     sys.exit()
 
-    user = sys.argv[1]
-    passw = sys.argv[2]
+    # user = sys.argv[1]
+    # passw = sys.argv[2]
+    # port = int(sys.argv[3])
 
-    ultra96 = UltraClient(user, passw,queue)
+    # ultra96 = UltraClient(user, passw, port,queue)
  
     
-    connectClient(ultra96)
+    #connectClient(ultra96)
 
     for x in Addresses.keys():
         connect(x)
 
     for device in devices:
+       firstHandShake(device)
 
-        
-        try:
-            device.handShakeWithBeetle()
-        except btle.BTLEDisconnectError as c:
-            device.reconnect()
 
     try:
 
@@ -586,7 +585,8 @@ def main():
         with ThreadPoolExecutor() as ex:
             results = ex.map(start, devices)
             
-            ex.submit(sendDataClient(ultra96))
+            #
+            #ex.submit(sendDataClient(ultra96))
 
     except Exception as e:
         print(repr(e))
