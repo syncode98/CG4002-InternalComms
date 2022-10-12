@@ -8,29 +8,26 @@ typedef struct Packet {
   uint8_t header;
   uint8_t device;
   uint8_t type;
-  uint8_t seq;
   uint16_t rawX;
   uint16_t rawY;
   uint16_t rawZ;
   uint16_t accX;
   uint16_t accY;
   uint16_t accZ;
-  uint16_t pad1;
-  uint8_t pad2;
+  uint32_t pad;
   uint8_t checksum;
 
 } packet;
 
-struct Packet readings = {170, 4,  4,  0,  0,  0,  0,  0,  0,  0, 0,  0, 0};
-struct Packet ACK =   {170, 0,  2,  0,  0,  0,  0,  0,  0,  0, 0,  0, 170 ^ 0 ^ 2};
+struct Packet readings = {170, 4,  4,  0,  0,  0,  0,  0,  0,  0, 0,};
+struct Packet ACK =      {170, 4,  2, 0,  0,  0,  0,  0,  0, 0, 170 ^ 4 ^ 2};
 
-uint8_t seq = 0;
-int packetCount;
+
 unsigned long current = 0;
 unsigned long start = 0;
 unsigned long receivedData = 0;
+
 int establishConnection = 0;
-int check = 0;
 
 MPU6050 mpu;
 int ax, ay, az;
@@ -73,8 +70,7 @@ void readData() {
     rawgy += gy;
     rawgz += gz;
   }
-  readings.seq = seq;
-  seq = (seq + 1);
+
   uint8_t *ptr = (uint8_t*)&readings;
   uint8_t *endptr = (uint8_t*)&readings + 19;
   int checksum = 0;
@@ -133,13 +129,13 @@ void loop() {
         clearBuffer();
         Serial.write((uint8_t *) &ACK, sizeof(ACK));
         Serial.flush();
+        
         //If device disconnects and is not reset
         establishConnection = 0;
 
       }
       else if (data[0] == 171) {
         clearBuffer();
-        check = 1;
         establishConnection = 1;
       }
       else if (data[0] == 172) {
