@@ -33,9 +33,9 @@ queue = man.Queue()
 
 Addresses = {
 
-    #  'IMU':'d0:39:72:bf:c8:e0',
-    #  'GUN' : 'd0:39:72:bf:c8:ff',
-    #  'VEST' : 'c4:be:84:20:19:1a'
+     'IMU':'d0:39:72:bf:c8:e0',
+     'GUN' : 'd0:39:72:bf:c8:ff',
+     'VEST' : 'c4:be:84:20:19:1a'
 
     
     #"GUN": 'd0:39:72:bf:bf:9c',
