@@ -262,7 +262,7 @@ class MyDelegate(btle.DefaultDelegate):
             #print(
             #    "------------------------------------------------------------------------------")
             #print(self.beetle.name)
-            print(data)
+            #print(data)
             # To handshake with the beetle
             if (self.beetle.start == 0):
                 try:
@@ -283,31 +283,31 @@ class MyDelegate(btle.DefaultDelegate):
 
             else:
                 
-                print(data)
+                #print(data)
                 self.flag = True
                 if (self.verifyData(list(data)) == True):
                     self.processData(data)
                     self.retrPacket += 1
 
                 else:
-                    print(self.beetle.name+":"+str(data))
+                    #print(self.beetle.name+":"+str(data))
                     # print(data[0])
                     # print(data[1])
                     # print(len(data))
                     if (len(self.buffer) == 0):
                         self.buffer.extend(data)
-                        print(self.buffer)
+                        #print(self.buffer)
                         if (self.header in self.buffer):
-                            print(self.buffer)
+                            #print(self.buffer)
                             # Find the header and shift it to the front of the buffer
                             while (self.buffer[0] != self.header):
-                                print("shifting")
+                                #print("shifting")
                                 self.buffer.pop(0)
 
                             if (self.retrPacket > 0):
                                 # The previous packet is being discarded since its not retrievable
                                 self.retrPacket -= 1
-                            print(self.buffer)
+                            #print(self.buffer)
                             # print("------------------------------------------------------------------------------")
                         # Do not append any bytes if the header is not present
 
@@ -324,7 +324,7 @@ class MyDelegate(btle.DefaultDelegate):
                                 newIndex = 20
                             # Obtain the fragmented data
                             fragmented = self.buffer[:newIndex].copy()
-                            print("Fragmented Data" + str(fragmented))
+                            #print("Fragmented Data" + str(fragmented))
 
                             # Extract the data if it satisfies the checksum criteria
                             if (self.verifyData(fragmented)):
@@ -353,7 +353,7 @@ class MyDelegate(btle.DefaultDelegate):
                             self.shiftBuffer(newIndex)
 
                         if (len(self.buffer) > 50):
-                            print("Length of Buffer is too large")
+                            #print("Length of Buffer is too large")
                             # print(self.buffer)
                             self.buffer.clear()
 
@@ -494,6 +494,7 @@ def firstHandShake(beetle):
                     else:
                         print("Unsuccessful")
 
+
               
 
         except btle.BTLEDisconnectError as c:
@@ -556,9 +557,10 @@ class UltraClient(threading.Thread):
     # sending dummy data to ultra96
     def send(self, data):
         try:
-            print(data)
-            data = "RECV"
-            self.client.sendall(data.encode("utf8"))
+            
+            data_to_send = str(len(data)) + '_'+ data
+            print(data_to_send)
+            self.client.sendall(data_to_send.encode("utf8"))
         except Exception as e:
             print(e)
 
