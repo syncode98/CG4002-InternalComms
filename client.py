@@ -40,7 +40,7 @@ Addresses = {
     
     #"GUN": 'd0:39:72:bf:bf:9c',
     #'VEST': 'd0:39:72:bf:c3:b0',
-    'IMU1': 'd0:39:72:bf:c3:89'
+    #'IMU1': 'd0:39:72:bf:c3:89'
 }
 
 devices = []
