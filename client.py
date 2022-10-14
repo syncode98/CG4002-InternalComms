@@ -1,4 +1,4 @@
-import queue
+
 from bluepy import btle
 from struct import *
 import logging
@@ -28,19 +28,19 @@ RESETACK = bytes(
 shoot = True
 count = 0
 # create a queue to be passed to the relevant beetles
-#man = Manager()
-queue = queue.Queue()
+man = Manager()
+queue = man.Queue()
 
 Addresses = {
 
-     'IMU':'d0:39:72:bf:c8:e0',
-     'GUN' : 'd0:39:72:bf:c8:ff',
-     'VEST' : 'c4:be:84:20:19:1a'
+    #  'IMU':'d0:39:72:bf:c8:e0',
+    #  'GUN' : 'd0:39:72:bf:c8:ff',
+    #  'VEST' : 'c4:be:84:20:19:1a'
 
     
     #"GUN": 'd0:39:72:bf:bf:9c',
     #'VEST': 'd0:39:72:bf:c3:b0',
-    #'IMU1': 'd0:39:72:bf:c3:89'
+    'IMU1': 'd0:39:72:bf:c3:89'
 }
 
 devices = []
@@ -69,9 +69,11 @@ class Device():
         self.count = 0
         self.queue = queue
         self.sendCount = 1
+        self.flag = False
+ 
 
     def sendDataToClient(self, recv):
-        print(recv)
+        #print(recv)
         if ('IMU' in self.name):
             toSend = {'P': 1, 'D': 'IMU', "V":  recv}
             jsonFormat = json.dumps(toSend)
@@ -107,7 +109,7 @@ class Device():
 
         count = 0
         
-        while (count < 5 and self.disconnect == 0 and self.start == 0):
+        while (count < 5 and self.start == 0 and self.disconnect == 0):
             try:
                 self.characteristic.write(SYN)
                 self.peripheral.waitForNotifications(3.0)
@@ -117,6 +119,9 @@ class Device():
                     print(self.name + ":Unsuccesful Handshake")
                 else:
                     print(self.name + ":Successful handshake")
+                
+                    
+                    
             except Exception as e:
                 print(e)
                 count = 5
@@ -142,7 +147,7 @@ class MyDelegate(btle.DefaultDelegate):
         self.track = 0
         self.play = True
         self.countPacket = 0
-        self.start = 0
+        self.start = 1
         self.timer = 1
         self.fragmented = []
         self.header = 170
@@ -165,8 +170,6 @@ class MyDelegate(btle.DefaultDelegate):
             # calcualte the checksum for the data by doing XOR operation
             for x in data[:19]:
                 result ^= x
-            # print(result)
-            # print(data[19])
             return (result == data[19] and data[0] == 170)
 
         except Exception as e:
@@ -188,7 +191,7 @@ class MyDelegate(btle.DefaultDelegate):
         self.buffer.clear()
         self.buffer = remainingBuffer.copy()
         remainingBuffer.clear()
-        #print("Remaining buffer:" + str(self.buffer))
+
 
     def processData(self, data):
 
@@ -259,7 +262,7 @@ class MyDelegate(btle.DefaultDelegate):
             #print(
             #    "------------------------------------------------------------------------------")
             #print(self.beetle.name)
-            #print(data)
+            print(data)
             # To handshake with the beetle
             if (self.beetle.start == 0):
                 try:
@@ -281,28 +284,30 @@ class MyDelegate(btle.DefaultDelegate):
             else:
                 
                 print(data)
+                self.flag = True
                 if (self.verifyData(list(data)) == True):
                     self.processData(data)
                     self.retrPacket += 1
 
                 else:
-                    # print(self.beetle.name+":"+str(data))
+                    print(self.beetle.name+":"+str(data))
                     # print(data[0])
                     # print(data[1])
                     # print(len(data))
                     if (len(self.buffer) == 0):
                         self.buffer.extend(data)
-                        # print(self.buffer)
+                        print(self.buffer)
                         if (self.header in self.buffer):
-                            # print(self.buffer)
+                            print(self.buffer)
                             # Find the header and shift it to the front of the buffer
                             while (self.buffer[0] != self.header):
+                                print("shifting")
                                 self.buffer.pop(0)
 
                             if (self.retrPacket > 0):
                                 # The previous packet is being discarded since its not retrievable
                                 self.retrPacket -= 1
-                            # print(self.buffer)
+                            print(self.buffer)
                             # print("------------------------------------------------------------------------------")
                         # Do not append any bytes if the header is not present
 
@@ -319,26 +324,26 @@ class MyDelegate(btle.DefaultDelegate):
                                 newIndex = 20
                             # Obtain the fragmented data
                             fragmented = self.buffer[:newIndex].copy()
-                            #print("Fragmented Data" + str(fragmented))
+                            print("Fragmented Data" + str(fragmented))
 
                             # Extract the data if it satisfies the checksum criteria
                             if (self.verifyData(fragmented)):
                                 self.processData(bytes(fragmented))
-                                #print("Retr:" + str(fragmented[3]))
-                                # if ('IMU' in self.beetle.name):
-                                #     recv = unpack(
-                                #         'HHHHHH', bytes(fragmented)[3:15])
-                                #     self.beetle.sendDataToClient(recv)
-                                # else:
-                                #     self.seq.append(fragmented[3])
+                               
+                                if ('IMU' in self.beetle.name):
+                                    recv = unpack(
+                                        'HHHHHH', bytes(fragmented)[3:15])
+                                    self.beetle.sendDataToClient(recv)
+                                else:
+                                    self.seq.append(fragmented[3])
 
-                                #     self.beetle.sendDataToClient(fragmented)
-                                #     if (fragmented[3] == self.countPacket):
-                                #         self.countPacket += 1
-                                #         self.sendACK(self.countPacket)
-                                #     else:
-                                #         print(self.countPacket)
-                                #         print(fragmented[3])
+                                    self.beetle.sendDataToClient(fragmented)
+                                    if (fragmented[3] == self.countPacket):
+                                        self.countPacket += 1
+                                        self.sendACK(self.countPacket)
+                                    #else:
+                                        #print(self.countPacket)
+                                        #print(fragmented[3])
 
                                 self.retrPacket += 1
                             else:
@@ -348,7 +353,7 @@ class MyDelegate(btle.DefaultDelegate):
                             self.shiftBuffer(newIndex)
 
                         if (len(self.buffer) > 50):
-                            #print("Length of Buffer is too large")
+                            print("Length of Buffer is too large")
                             # print(self.buffer)
                             self.buffer.clear()
 
@@ -405,6 +410,7 @@ def start(beetle):
         try:
             if beetle.disconnect == 1:
                 try:
+                    print("connecting")
                     beetle.peripheral.connect(beetle.ADDRESS)
                     beetle.disconnect = 0
 
@@ -417,10 +423,36 @@ def start(beetle):
 
             else:
 
-                while beetle.start == 0 and beetle.disconnect == 0:
-                    beetle.handShakeWithBeetle()
+                while beetle.start == 0:
+                    beetle.characteristic.write(SYN)
+                    #beetle.handShakeWithBeetle()
+                    if(beetle.peripheral.waitForNotifications(4.0)==True and beetle.start == 1):
+                        print("Successful")
+                    
+                    else:
+                        #print(beetle.characteristic.read())
+                        print("Unsuccessful")
+                        # beetle.start = 1
+                        # beetle.characteristic.write(SYNACK)
+                        # while True:
+                        #     #beetle.peripheral.waitForNotifications(1.0)
+                        #     print(beetle.characteristic.read())
+                        
 
-                beetle.peripheral.waitForNotifications(1.0)
+                beetle.peripheral.waitForNotifications(1.0)                 
+                    # if('IMU' in beetle.name):
+                    #      print("Loss")
+                    #      count = 5
+                    #      while (beetle.disconnect == 0):
+                    #          try:
+                    #             beetle.peripheral.disconnect()
+                    #             beetle.disconnect = 1
+                    #             beetle.start = 0
+                    #             print("successfull")
+                    #             time.sleep(3)
+                    #          except Exception as e:
+                    #             pass
+
 
         except btle.BTLEDisconnectError as c:
             print(beetle.name + ":disconnected")
@@ -454,7 +486,13 @@ def firstHandShake(beetle):
             else:
 
                 while beetle.start == 0 and beetle.disconnect == 0:
-                    beetle.handShakeWithBeetle()
+                    beetle.characteristic.write(SYN)
+                    #beetle.handShakeWithBeetle()
+                    if(beetle.peripheral.waitForNotifications(4.0)==True and beetle.start == 1):
+                        print("Successful")
+                    
+                    else:
+                        print("Unsuccessful")
 
               
 
@@ -466,6 +504,7 @@ def firstHandShake(beetle):
         except Exception as e:
            
             print(e)
+            time.sleep(2)
 
  
   
@@ -517,6 +556,8 @@ class UltraClient(threading.Thread):
     # sending dummy data to ultra96
     def send(self, data):
         try:
+            print(data)
+            data = "RECV"
             self.client.sendall(data.encode("utf8"))
         except Exception as e:
             print(e)
@@ -539,6 +580,7 @@ def sendDataClient(ultra96):
         try:
 
             data = ultra96.queue.get()
+
             ultra96.send(data)
 
             
@@ -558,18 +600,18 @@ def sendDataClient(ultra96):
 
 def main():
 
-    # if len(sys.argv) != 4:
-    #     print("input sunfire username and password, port")
-    #     sys.exit()
+    if len(sys.argv) != 4:
+        print("input sunfire username and password, port")
+        sys.exit()
 
-    # user = sys.argv[1]
-    # passw = sys.argv[2]
-    # port = int(sys.argv[3])
+    user = sys.argv[1]
+    passw = sys.argv[2]
+    port = int(sys.argv[3])
 
-    # ultra96 = UltraClient(user, passw, port,queue)
+    ultra96 = UltraClient(user, passw, port,queue)
  
     
-    #connectClient(ultra96)
+    connectClient(ultra96)
 
     for x in Addresses.keys():
         connect(x)
@@ -580,13 +622,10 @@ def main():
 
     try:
 
-       
 
         with ThreadPoolExecutor() as ex:
             results = ex.map(start, devices)
-            
-            #
-            #ex.submit(sendDataClient(ultra96))
+            ex.submit(sendDataClient(ultra96))
 
     except Exception as e:
         print(repr(e))
