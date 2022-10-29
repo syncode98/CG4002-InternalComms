@@ -16,6 +16,7 @@ import sys
 import json
 from enum import Enum
 import os
+import paho.mqtt.client as mqtt
 
 # #The values to be sent as SYN and SYNACK packets are stored in a list
 # #before being converted to bytes
@@ -25,22 +26,29 @@ SYNACK_values = [171, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 SYNACK = bytes(SYNACK_values)
 RESETACK = bytes(
     [172, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+
+Player = 1
+
 shoot = True
 count = 0
 # create a queue to be passed to the relevant beetles
 man = Manager()
 queue = man.Queue()
+mqttQueue = man.Queue()
 
 Addresses = {
+    #Player 1
+    #'vest' :'c4:be:84:20:19:1a',
+    #"gun": 'd0:39:72:bf:bf:9c',
+    #'imu': 'd0:39:72:bf:c3:89'
 
-     'IMU':'d0:39:72:bf:c8:e0',
-     'GUN' : 'd0:39:72:bf:c8:ff',
-     'VEST' : 'c4:be:84:20:19:1a'
 
-    
-    #"GUN": 'd0:39:72:bf:bf:9c',
-    #'VEST': 'd0:39:72:bf:c3:b0',
-    #'IMU1': 'd0:39:72:bf:c3:89'
+    #Player2
+    #'imu':'d0:39:72:bf:c8:e0',
+    #'gun' : 'd0:39:72:bf:c8:ff',
+    #'vest' : 'd0:39:72:bf:c3:b0'
+
+
 }
 
 devices = []
@@ -56,7 +64,7 @@ json_format_SHIELD = json.dumps({"P": 1, "D": "VEST", "V": 1})
 class Device():
 
     def __init__(self, ADDRESS, peripheral, service, characteristic, queue,
-                 name):
+                 name,mqtt):
 
         self.disconnect = 0
         self.ADDRESS = ADDRESS
@@ -70,23 +78,24 @@ class Device():
         self.queue = queue
         self.sendCount = 1
         self.flag = False
+        self.mqtt = mqtt
  
 
     def sendDataToClient(self, recv):
         #print(recv)
-        if ('IMU' in self.name):
+        if ('imu' in self.name):
             toSend = {'P': 1, 'D': 'IMU', "V":  recv}
             jsonFormat = json.dumps(toSend)
             #print(jsonFormat)
             self.queue.put(jsonFormat)
 
-        elif ('GUN' in self.name):
-            print('GUN:' + str(self.sendCount))
+        elif ('gun' in self.name):
+            #print('GUN:' + str(self.sendCount))
             #print(json_format_GUN)
             self.queue.put(json_format_GUN)
 
         else:
-            print('VEST:' + str(self.sendCount))
+            #print('VEST:' + str(self.sendCount))
             #print(json_format_SHIELD)
             self.queue.put(json_format_SHIELD)
         self.sendCount+=1
@@ -177,9 +186,10 @@ class MyDelegate(btle.DefaultDelegate):
         return False
 
     def sendACK(self, count):
-        if ('GUN' in self.beetle.name or 'VEST' in self.beetle.name):
+        if ('gun' in self.beetle.name or 'vest' in self.beetle.name):
             SYNACK_values[1] = count
-            print("Sending ACK NO:" + str(SYNACK_values[1]))
+            
+            #print(self.beetle.name + " Sending ACK NO:" + str(SYNACK_values[1]))
             self.beetle.characteristic.write(bytes(SYNACK_values))
 
     def shiftBuffer(self, newIndex):
@@ -194,23 +204,30 @@ class MyDelegate(btle.DefaultDelegate):
 
 
     def processData(self, data):
-
+        print(data)
         recv = unpack('HHHHHH', data[3:15])
-        if('IMU' in self.beetle.name):
-             self.beetle.sendDataToClient(recv)
-
-        elif ((data[3] == self.countPacket and ('VEST' or 'GUN' in self.beetle.name))):
-            if(data[3] not in self.sendData):
-                self.sendData.append(data[3])
-
+        packetNo = recv[0]
+        print(packetNo)
+        print(self.countPacket)
+        if('imu' in self.beetle.name):
+            print(recv)
+            self.beetle.sendDataToClient(recv)
+        
+        #elif ((data[3] == self.countPacket and ('vest' or 'gun' in self.beetle.name))):
+        #    if(data[3] not in self.sendData):
+        #        self.sendData.append(data[3])
+        elif ((packetNo == self.countPacket and ('vest' or 'gun' in self.beetle.name))):
+            if(packetNo not in self.sendData):
+                self.sendData.append(packetNo)        
+                print(recv)
                 self.beetle.sendDataToClient(recv)
                 global shoot
                 global count
-                if('GUN' in self.beetle.name):
+                if('gun' in self.beetle.name):
                     shoot = True
                     #print(self.beetle.name+":Correct transmission:" + str(data[3]))
                     
-                elif('VEST' in self.beetle.name):
+                elif('vest' in self.beetle.name):
                     shoot = True
                     #print(self.beetle.name+":Correct transmission:" + str(data[3]))
                     # if(shoot ==True):
@@ -232,8 +249,12 @@ class MyDelegate(btle.DefaultDelegate):
                 
                 self.seq.append(self.countPacket)
                 self.countPacket += 1
-                print(self.countPacket)
+                #print(self.countPacket)
                 self.sendACK(self.countPacket)
+                if(self.countPacket == 255):
+                    self.seq.clear()
+                    self.countPacket = 0
+                    self.sendData.clear()
             #else:
                 #print(self.beetle.name +":" + str(data[3]) +":exists")
                 #self.sendACK(data[3])
@@ -250,9 +271,11 @@ class MyDelegate(btle.DefaultDelegate):
                 # self.countPacket+=1
                 # self.seq.append(self.countPacket)
                 # print(self.countPacket)
-        # else:
-        #     if (data[3] in self.seq):
-        #         print(self.beetle.name+":Have already received the packet")
+        else:
+            if (packetNo in self.seq):
+                #print(self.beetle.name+":Have already received the packet" + str(data[3]))
+                self.sendACK(packetNo+1)
+                #print(self.beetle.name+":Resending ACK packet" + str(data[3]))
         #     else:
         #         print("Missing:" + str(self.countPacket))
 
@@ -283,14 +306,14 @@ class MyDelegate(btle.DefaultDelegate):
 
             else:
                 
-                #print(data)
+                #print(self.beetle.name + ":" + str(data))
                 self.flag = True
                 if (self.verifyData(list(data)) == True):
                     self.processData(data)
                     self.retrPacket += 1
 
                 else:
-                    #print(self.beetle.name+":"+str(data))
+                    print(self.beetle.name+":"+str(data))
                     # print(data[0])
                     # print(data[1])
                     # print(len(data))
@@ -329,21 +352,23 @@ class MyDelegate(btle.DefaultDelegate):
                             # Extract the data if it satisfies the checksum criteria
                             if (self.verifyData(fragmented)):
                                 self.processData(bytes(fragmented))
-                               
-                                if ('IMU' in self.beetle.name):
-                                    recv = unpack(
+                                recv = unpack(
                                         'HHHHHH', bytes(fragmented)[3:15])
-                                    self.beetle.sendDataToClient(recv)
-                                else:
-                                    self.seq.append(fragmented[3])
+                                # if ('imu' in self.beetle.name):
+                                #     #recv = unpack(
+                                #      #   'HHHHHH', bytes(fragmented)[3:15])
+                                #     print(recv)
+                                #     #self.beetle.sendDataToClient(recv)
+                                # else:
+                                #     #self.seq.append(fragmented[3])
 
-                                    self.beetle.sendDataToClient(fragmented)
-                                    if (fragmented[3] == self.countPacket):
-                                        self.countPacket += 1
-                                        self.sendACK(self.countPacket)
-                                    #else:
-                                        #print(self.countPacket)
-                                        #print(fragmented[3])
+                                #     #self.beetle.sendDataToClient(fragmented)
+                                #     if (fragmented[3] == self.countPacket):
+                                #         self.countPacket += 1
+                                #         self.sendACK(self.countPacket)
+                                #     #else:
+                                #         #print(self.countPacket)
+                                #         #print(fragmented[3])
 
                                 self.retrPacket += 1
                             else:
@@ -361,7 +386,7 @@ class MyDelegate(btle.DefaultDelegate):
             print(self.beetle.name + str(e))
 
 
-def connect(name):
+def connect(name,mqtt):
 
     addr = Addresses[name]
     print(addr)
@@ -390,7 +415,7 @@ def connect(name):
             service = currentBeetle.getServiceByUUID('dfb0')
             characteristic = service.getCharacteristics()[0]
             beetle = Device(addr, currentBeetle, service, characteristic,
-                            queue, name)
+                            queue, name,mqtt)
             currentBeetle.withDelegate(MyDelegate(beetle))
             initialise = 1
             print("initialised")
@@ -415,6 +440,7 @@ def start(beetle):
                     beetle.disconnect = 0
 
                     print("Reconnected")
+                    beetle.mqtt.publish(beetle.name,"RC")
                 except Exception as e:
                     print(e)
                     # print("disconnected")
@@ -439,22 +465,21 @@ def start(beetle):
                         #     print(beetle.characteristic.read())
                         
 
-                beetle.peripheral.waitForNotifications(1.0)                 
+                if(beetle.peripheral.waitForNotifications(1.0) == False and 'imu' in beetle.name):
+                    beetle.mqtt.publish(beetle.name,"DC")
+                    #beetle.mqttQueue.put(beetle.name)              
                     # if('IMU' in beetle.name):
                     #      print("Loss")
                     #      count = 5
-                    #      while (beetle.disconnect == 0):
-                    #          try:
-                    #             beetle.peripheral.disconnect()
-                    #             beetle.disconnect = 1
-                    #             beetle.start = 0
-                    #             print("successfull")
-                    #             time.sleep(3)
-                    #          except Exception as e:
-                    #             pass
+
 
 
         except btle.BTLEDisconnectError as c:
+            
+            
+            beetle.mqtt.publish(beetle.name,"DC")
+            #beetle.mqttQueue.put(beetle.name)
+            
             print(beetle.name + ":disconnected")
             beetle.disconnect = 1
             beetle.start = 0
@@ -521,6 +546,7 @@ class UltraClient(threading.Thread):
         self.is_start = threading.Event()
         self.queue = queue
         self.port = port
+        self.value='ULTRA96'
 
     # sshtunneling into sunfire
     def start_tunnel(self):
@@ -556,13 +582,15 @@ class UltraClient(threading.Thread):
 
     # sending dummy data to ultra96
     def send(self, data):
+
         try:
             
             data_to_send = str(len(data)) + '_'+ data
             print(data_to_send)
             self.client.sendall(data_to_send.encode("utf8"))
         except Exception as e:
-            print(e)
+            pass
+            #print(e)
 
 
 def connectClient(ultra96):
@@ -576,29 +604,75 @@ def connectClient(ultra96):
     count = 0
 
 
-def sendDataClient(ultra96):
+def runClients(client):
     print("Send to Client")
-    while True:
-        try:
+    if(client.value == 'MQTT'):
+        client.client.loop_start()
+    else:
+        while True:
+            try:
 
-            data = ultra96.queue.get()
+                data = client.queue.get()
+                #print(data)
+                client.send(data)
 
-            ultra96.send(data)
+                
+            except ConnectionRefusedError:
+                print("connection refused")
+                client.is_start.clear()
+            except IOError as e:
+                print(str(e))
+                # break
+            except Exception as e:
+                print(e)
+                break
 
-            
-        except ConnectionRefusedError:
-            print("connection refused")
-            ultra96.is_start.clear()
-        except IOError as e:
-            print(str(e))
-            # break
-        except Exception as e:
-            print(e)
-            break
+    #ultra96.client.close()
+    print(client.value +":[CLOSED]")
 
-    ultra96.client.close()
-    print("[CLOSED]")
+class MQTTClient():
+    def __init__(self, topic, client_name,queue):
+        self.topic = topic 
+        self.queue = queue
+        self.client = mqtt.Client(client_name,clean_session=False)
+        self.client.on_publish = on_publish
+        self.client.connect('test.mosquitto.org')
+        self.client.subscribe(self.topic)
+        self.value = 'MQTT'
+        
 
+
+    def stop(self):
+        self.client.unsubscribe()
+        self.client.loop_stop()
+        self.client.disconnect()
+
+
+    def publish(self,device,status):
+        MQTT_DATA = {
+        "p1": {"imu": "","gun": "","vest": ""},
+        "p2": {"imu": "","gun": "","vest": "" }
+        }
+        currentKey = 'p'+str(Player)
+        if(status == 'DC'):
+            MQTT_DATA[currentKey][device] = "No"
+        
+        message = json.dumps(MQTT_DATA)
+        print(message)
+        res,num = self.client.publish(self.topic, message, qos = 1)
+
+#TESTING
+def on_publish(client,userdata, msg ):
+    print("Received Message: " + str(msg))  # Print a received msg
+    pass
+        
+#def on_connect(client, userdata, flags, rc):
+ #   print("Succesfully connected "+str(rc))
+ #   topic = 'visualizer17'
+    # Subscribing in on_connect() means that if we lose the connection and
+    # reconnect then subscriptions will be renewed.
+  #  client.subscribe(topic)
+    #client.publish(topic,"hello",qos = 1)
 
 def main():
 
@@ -614,21 +688,26 @@ def main():
  
     
     connectClient(ultra96)
+    mqtt = MQTTClient("visualizer17","test",mqttQueue)
 
     for x in Addresses.keys():
-        connect(x)
+        connect(x,mqtt)
+
 
     for device in devices:
        firstHandShake(device)
 
 
+
+    clients = [ultra96,mqtt]
     try:
 
 
-        with ThreadPoolExecutor() as ex:
+        with ThreadPoolExecutor(8) as ex:
             results = ex.map(start, devices)
-            ex.submit(sendDataClient(ultra96))
-
+            #res1 = ex.submit(sendDataClient(ultra96))
+            res2 = ex.map(runClients,clients)
+            #res = ex.submit(mqtt.client.loop_start())
     except Exception as e:
         print(repr(e))
 
