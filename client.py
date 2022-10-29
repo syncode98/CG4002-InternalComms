@@ -36,21 +36,35 @@ man = Manager()
 queue = man.Queue()
 mqttQueue = man.Queue()
 
-Addresses = {
-    #Player 1
-    #'vest' :'c4:be:84:20:19:1a',
-    #"gun": 'd0:39:72:bf:bf:9c',
-    #'imu': 'd0:39:72:bf:c3:89'
+if Player == 1:
+    Addresses = {
+        #Player 1
+        'vest' :'c4:be:84:20:19:1a',
+        "gun": 'd0:39:72:bf:bf:9c',
+        'imu': 'd0:39:72:bf:c3:89'
+    }
+else:
+
+    Addresses = {
+        #Player2
+        'imu':'d0:39:72:bf:c8:e0',
+        'gun' : 'd0:39:72:bf:c8:ff',
+        'vest' : 'd0:39:72:bf:c3:b0'
+    }
+# Addresses = {
+#     #Player 1
+#     #'vest' :'c4:be:84:20:19:1a',
+#     "gun": 'd0:39:72:bf:bf:9c',
+#     'imu': 'd0:39:72:bf:c3:89'
 
 
-    #Player2
-    #'imu':'d0:39:72:bf:c8:e0',
-    #'gun' : 'd0:39:72:bf:c8:ff',
-    #'vest' : 'd0:39:72:bf:c3:b0'
+#     #Player2
+#     #'imu':'d0:39:72:bf:c8:e0',
+#     #'gun' : 'd0:39:72:bf:c8:ff',
+#     #'vest' : 'd0:39:72:bf:c3:b0'
 
 
-}
-
+# }
 devices = []
 disconnected = []
 handshaked = []
@@ -204,13 +218,13 @@ class MyDelegate(btle.DefaultDelegate):
 
 
     def processData(self, data):
-        print(data)
+        #print(data)
         recv = unpack('HHHHHH', data[3:15])
         packetNo = recv[0]
-        print(packetNo)
-        print(self.countPacket)
+        #print(packetNo)
+        #print(self.countPacket)
         if('imu' in self.beetle.name):
-            print(recv)
+            #print(recv)
             self.beetle.sendDataToClient(recv)
         
         #elif ((data[3] == self.countPacket and ('vest' or 'gun' in self.beetle.name))):
@@ -219,7 +233,7 @@ class MyDelegate(btle.DefaultDelegate):
         elif ((packetNo == self.countPacket and ('vest' or 'gun' in self.beetle.name))):
             if(packetNo not in self.sendData):
                 self.sendData.append(packetNo)        
-                print(recv)
+                #print(recv)
                 self.beetle.sendDataToClient(recv)
                 global shoot
                 global count
@@ -313,7 +327,7 @@ class MyDelegate(btle.DefaultDelegate):
                     self.retrPacket += 1
 
                 else:
-                    print(self.beetle.name+":"+str(data))
+                    #print(self.beetle.name+":"+str(data))
                     # print(data[0])
                     # print(data[1])
                     # print(len(data))
@@ -443,6 +457,7 @@ def start(beetle):
                     beetle.mqtt.publish(beetle.name,"RC")
                 except Exception as e:
                     print(e)
+                    beetle.mqtt.publish(beetle.name,"DC")
                     # print("disconnected")
                     count += 1
                     time.sleep(1)
@@ -467,6 +482,7 @@ def start(beetle):
 
                 if(beetle.peripheral.waitForNotifications(1.0) == False and 'imu' in beetle.name):
                     beetle.mqtt.publish(beetle.name,"DC")
+                    print("reset IMU")
                     #beetle.mqttQueue.put(beetle.name)              
                     # if('IMU' in beetle.name):
                     #      print("Loss")
@@ -586,7 +602,8 @@ class UltraClient(threading.Thread):
         try:
             
             data_to_send = str(len(data)) + '_'+ data
-            print(data_to_send)
+            if 'IMU' not in data_to_send:
+                print(data_to_send)
             self.client.sendall(data_to_send.encode("utf8"))
         except Exception as e:
             pass
@@ -635,7 +652,7 @@ class MQTTClient():
         self.topic = topic 
         self.queue = queue
         self.client = mqtt.Client(client_name,clean_session=False)
-        self.client.on_publish = on_publish
+        #self.client.on_publish = on_publish
         self.client.connect('test.mosquitto.org')
         self.client.subscribe(self.topic)
         self.value = 'MQTT'
@@ -658,13 +675,13 @@ class MQTTClient():
             MQTT_DATA[currentKey][device] = "No"
         
         message = json.dumps(MQTT_DATA)
-        print(message)
+        #print(message)
         res,num = self.client.publish(self.topic, message, qos = 1)
 
 #TESTING
-def on_publish(client,userdata, msg ):
-    print("Received Message: " + str(msg))  # Print a received msg
-    pass
+# def on_publish(client,userdata, msg ):
+#     print("Received Message: " + str(msg))  # Print a received msg
+#     pass
         
 #def on_connect(client, userdata, flags, rc):
  #   print("Succesfully connected "+str(rc))
