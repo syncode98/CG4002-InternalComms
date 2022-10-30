@@ -691,7 +691,7 @@ class MQTTClient():
             MQTT_DATA[currentKey][dev] = 'no'
                 
         
-        message = json.dumps(MQTT_DATA)[currentKey][device] = ''
+        message = json.dumps(MQTT_DATA)
         #print(message)
         res,num = self.client.publish(self.topic, message, qos = 1)
 
