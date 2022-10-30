@@ -39,7 +39,7 @@ mqttQueue = man.Queue()
 if Player == 1:
     Addresses = {
         #Player 1
-        'vest' :'c4:be:84:20:19:1a',
+        #'vest' :'c4:be:84:20:19:1a',
         "gun": 'd0:39:72:bf:bf:9c',
         'imu': 'd0:39:72:bf:c3:89'
     }
@@ -70,9 +70,9 @@ disconnected = []
 handshaked = []
 
 recv = list()
-json_format_IMU = {"P": 1, "D": "IMU", "V": recv}
-json_format_GUN = json.dumps({"P": 1, "D": "GUN", "V": 1})
-json_format_SHIELD = json.dumps({"P": 1, "D": "VEST", "V": 1})
+json_format_IMU = {"P": Player, "D": "IMU", "V": recv}
+json_format_GUN = json.dumps({"P": Player, "D": "GUN", "V": 1})
+json_format_SHIELD = json.dumps({"P": Player, "D": "VEST", "V": 1})
 
 
 class Device():
@@ -264,6 +264,7 @@ class MyDelegate(btle.DefaultDelegate):
                 self.seq.append(self.countPacket)
                 self.countPacket += 1
                 #print(self.countPacket)
+                #if(self.countPacket < 10):
                 self.sendACK(self.countPacket)
                 if(self.countPacket == 255):
                     self.seq.clear()
@@ -288,6 +289,7 @@ class MyDelegate(btle.DefaultDelegate):
         else:
             if (packetNo in self.seq):
                 #print(self.beetle.name+":Have already received the packet" + str(data[3]))
+                #if(packetNo<10):
                 self.sendACK(packetNo+1)
                 #print(self.beetle.name+":Resending ACK packet" + str(data[3]))
         #     else:
@@ -593,6 +595,10 @@ class UltraClient(threading.Thread):
             )
         tunnel2.start()
         print('[Tunnel Opened] Tunnel into Xilinx')
+        tunnel2.start()
+        print('[Tunnel Opened] Tunnel into Xilinx')
+
+        return tunnel2.local_bind_address
 
         return tunnel2.local_bind_address
 
@@ -631,6 +637,8 @@ def runClients(client):
 
                 data = client.queue.get()
                 #print(data)
+                if 'IMU' not in data:
+                    print(data)
                 client.send(data)
 
                 
@@ -656,7 +664,7 @@ class MQTTClient():
         self.client.connect('test.mosquitto.org')
         self.client.subscribe(self.topic)
         self.value = 'MQTT'
-        
+
 
 
     def stop(self):
@@ -671,10 +679,19 @@ class MQTTClient():
         "p2": {"imu": "","gun": "","vest": "" }
         }
         currentKey = 'p'+str(Player)
+
         if(status == 'DC'):
-            MQTT_DATA[currentKey][device] = "No"
+            if(device not in disconnected):
+                disconnected.append(device)
+
+        else:
+            disconnected.remove(device)
+        print(disconnected)
+        for dev in disconnected:
+            MQTT_DATA[currentKey][dev] = 'no'
+                
         
-        message = json.dumps(MQTT_DATA)
+        message = json.dumps(MQTT_DATA)[currentKey][device] = ''
         #print(message)
         res,num = self.client.publish(self.topic, message, qos = 1)
 
@@ -732,5 +749,5 @@ def main():
 if __name__ == '__main__':
     main()
 
-# commands to find port sudo lsof -i -P -n | grep 8086
+# commands to find port 'sudo lsof -i -P -n | grep 8086
 # sudo kill -i <pid>
