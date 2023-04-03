@@ -1,142 +1,181 @@
-
+#Utilise multiprocessing to communicate with servers
 from bluepy import btle
 from struct import *
-import logging
-import time
-from struct import *
-from multiprocessing import Pool, Lock, Process, Queue, Manager
-from concurrent.futures import ProcessPoolExecutor, wait, ThreadPoolExecutor
+from multiprocessing import Process, Queue, Manager
 import sys
 import socket
-import base64
 import threading
 import sshtunnel
-import time
 import sys
 import json
-from enum import Enum
-import os
+import paho.mqtt.client as mqtt
 
 # #The values to be sent as SYN and SYNACK packets are stored in a list
 # #before being converted to bytes
+
 SYN_values = [170, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 SYN = bytes(SYN_values)
-SYNACK_values = [171, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-SYNACK = bytes(SYNACK_values)
+ACK_values = [171, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+SYNACK  = bytes(ACK_values)
+ACK = bytes(ACK_values)
 RESETACK = bytes(
     [172, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+
+Player = 1
 shoot = True
 count = 0
 # create a queue to be passed to the relevant beetles
 man = Manager()
-queue = man.Queue()
+queue = Queue()
+mqttQueue = Queue()
+mqttQueueP = Queue()
+# mqttQueue = man.Queue()
 
-Addresses = {
+if Player == 1:
+    Addresses = {
+        #Player 1
+        
+        'vest' :'c4:be:84:20:19:1a',
+        "gun": 'd0:39:72:bf:bf:9c',
+        'imu': 'd0:39:72:bf:c3:89'
+        
+    }
 
-     'IMU':'d0:39:72:bf:c8:e0',
-     'GUN' : 'd0:39:72:bf:c8:ff',
-     'VEST' : 'c4:be:84:20:19:1a'
+else:
 
-    
-    #"GUN": 'd0:39:72:bf:bf:9c',
-    #'VEST': 'd0:39:72:bf:c3:b0',
-    #'IMU1': 'd0:39:72:bf:c3:89'
-}
-
+    Addresses = {
+        #Player2
+        'imu':'d0:39:72:bf:c8:e0',
+        'gun' : 'd0:39:72:bf:c8:ff',
+        'vest' : 'd0:39:72:bf:c3:b0'
+    }
 devices = []
-disconnected = []
-handshaked = []
+disconnectDevices = []
 
 recv = list()
-json_format_IMU = {"P": 1, "D": "IMU", "V": recv}
-json_format_GUN = json.dumps({"P": 1, "D": "GUN", "V": 1})
-json_format_SHIELD = json.dumps({"P": 1, "D": "VEST", "V": 1})
+json_format_IMU = {"P": Player, "D": "IMU", "V": recv}
+json_format_GUN = json.dumps({"P": Player, "D": "GUN", "V": 1})
+json_format_SHIELD = json.dumps({"P": Player, "D": "VEST", "V": 1})
 
 
-class Device():
+class Device(Process):
 
-    def __init__(self, ADDRESS, peripheral, service, characteristic, queue,
+    def __init__(self, ADDRESS,queue,
                  name):
-
+        super().__init__()
         self.disconnect = 0
         self.ADDRESS = ADDRESS
-        self.characteristic = characteristic
-        self.peripheral = peripheral
-        self.play = True
-        self.service = service
+        self.characteristic = None
+        self.peripheral = None
+        self.service = None
         self.name = name
-        self.start = 0
+        self.started = 0
         self.count = 0
-        self.queue = queue
         self.sendCount = 1
         self.flag = False
- 
+       
+
+    def initialise(self):
+
+        addr = self.ADDRESS
+        print("start")
+        connect = 0
+
+        initialise = 0
+        while initialise == 0:
+            while (connect == 0):
+                print("\r{} :Trying to Connect".format(self.name), end="")
+                try:
+                    currentBeetle = btle.Peripheral(addr)
+                    self.peripheral = currentBeetle
+                    print("Device Connected")
+                    connect = 1
+                except Exception as e:
+                    pass
+
+            # acquiring the services and characteristics of the beetle
+            initialise = 0
+            err = 1
+            while (connect == 1 and initialise == 0):
+                try:
+                    self.service = currentBeetle.getServiceByUUID('dfb0')
+                    self.characteristic = self.service.getCharacteristics()[0]
+                    currentBeetle.withDelegate(MyDelegate(self))
+                    initialise = 1
+                    print("initialised")
+
+                except btle.BTLEDisconnectError as c:
+                    print("Disconnected before intialisations")
+                    connect = 0
+                except Exception as e:
+                    print(e)                
+                    initialise = 0
+                       
+
+
 
     def sendDataToClient(self, recv):
         #print(recv)
-        if ('IMU' in self.name):
-            toSend = {'P': 1, 'D': 'IMU', "V":  recv}
+        if ('imu' in self.name):
+            toSend = {'P': Player, 'D': 'IMU', "V":  recv}
             jsonFormat = json.dumps(toSend)
-            #print(jsonFormat)
-            self.queue.put(jsonFormat)
+            queue.put(jsonFormat)
 
-        elif ('GUN' in self.name):
-            print('GUN:' + str(self.sendCount))
-            #print(json_format_GUN)
-            self.queue.put(json_format_GUN)
+        elif ('gun' in self.name):
+            queue.put(json_format_GUN)
 
         else:
-            print('VEST:' + str(self.sendCount))
-            #print(json_format_SHIELD)
-            self.queue.put(json_format_SHIELD)
+            queue.put(json_format_SHIELD)
         self.sendCount+=1
-    def reconnect(self):
-        while self.disconnect == 1:
-            try:
-                self.peripheral.connect(self.ADDRESS)
-                self.disconnect = 0
 
-                print("Reconnected")
-            except Exception as e:
-                print(e)
-                self.count += 1
-                time.sleep(1)
+    def run(self):
+     print("start")
+     self.initialise()
+     reset = 0
+    
+     while True:
+        try:
+            if self.disconnect == 1:
+                try:
 
-    def handShakeWithBeetle(self):
-        # Send the SYN PACKET and wait for 5 seconds to receive response
-        print(self.name + ":begin handshaking")
-        print()
+                    self.peripheral.connect(self.ADDRESS)
+                    self.disconnect = 0
 
-        count = 0
-        
-        while (count < 5 and self.start == 0 and self.disconnect == 0):
-            try:
-                self.characteristic.write(SYN)
-                self.peripheral.waitForNotifications(3.0)
 
-                count += 1
-                if (self.start == 0):
-                    print(self.name + ":Unsuccesful Handshake")
-                else:
-                    print(self.name + ":Successful handshake")
-                
+                    message = (self.name,"RC")
+                    mqttQueue.put(message)  
+                except Exception as e:
+                    pass
+
+            else:
+
+                while self.started == 0:
+                    self.characteristic.write(SYN)
+                    if(self.peripheral.waitForNotifications(4.0)==True and self.started == 1):
+                        print("Successful")                  
+                    else:
+                        print("Unsuccessful")
+                if(self.peripheral.waitForNotifications(1.0) == False and 'imu' in self.name):
+                    if(reset == 0):
+                        message = (self.name,"DC")           
+                        mqttQueue.put(message)  
+                        reset = 1               
                     
-                    
-            except Exception as e:
+        except btle.BTLEDisconnectError as c:
+            
+            self.started = 0
+            message = (self.name,"DC")           
+            mqttQueue.put(message)  
+            print(self.name + ":disconnected")
+            self.disconnect = 1
+            reset = 0
+
+        except Exception as e:
+            if(reset == 0):
                 print(e)
-                count = 5
-                
-                
+                reset = 1
 
-        while (count > 0 and self.start == 0):
-            try:
-                self.peripheral.disconnect()
-                self.disconnect = 1
-                count -= 1
-                time.sleep(1)
-            except Exception as e:
-                count = 0
-
+    print("End of transmission")
 
 class MyDelegate(btle.DefaultDelegate):
 
@@ -147,7 +186,7 @@ class MyDelegate(btle.DefaultDelegate):
         self.track = 0
         self.play = True
         self.countPacket = 0
-        self.start = 1
+        self.started = 1
         self.timer = 1
         self.fragmented = []
         self.header = 170
@@ -156,6 +195,7 @@ class MyDelegate(btle.DefaultDelegate):
         self.seq = []
         self.sendData = []
         self.count = 0
+        self.prev = 0
         self.increase = False
         
 
@@ -177,10 +217,14 @@ class MyDelegate(btle.DefaultDelegate):
         return False
 
     def sendACK(self, count):
-        if ('GUN' in self.beetle.name or 'VEST' in self.beetle.name):
-            SYNACK_values[1] = count
-            print("Sending ACK NO:" + str(SYNACK_values[1]))
-            self.beetle.characteristic.write(bytes(SYNACK_values))
+        if ('gun' in self.beetle.name or 'vest' in self.beetle.name):
+            ACK_values[1] = count
+            
+            print(self.beetle.name + " Sending ACK NO:" + str(ACK_values[1]))
+            self.beetle.characteristic.write(bytes(ACK_values))
+
+
+
 
     def shiftBuffer(self, newIndex):
         # clear the buffers and shift the data in self.buffer to ensure
@@ -194,346 +238,145 @@ class MyDelegate(btle.DefaultDelegate):
 
 
     def processData(self, data):
-
         recv = unpack('HHHHHH', data[3:15])
-        if('IMU' in self.beetle.name):
-             self.beetle.sendDataToClient(recv)
-
-        elif ((data[3] == self.countPacket and ('VEST' or 'GUN' in self.beetle.name))):
-            if(data[3] not in self.sendData):
-                self.sendData.append(data[3])
-
+        packetNo = recv[0]
+        print("process Data")
+        print(self.sendData)
+        if('imu' in self.beetle.name):
+            self.beetle.sendDataToClient(recv)
+        
+        elif ((packetNo == self.countPacket and ('vest' or 'gun' in self.beetle.name))):
+            if(packetNo not in self.sendData):
+                self.sendData.append(packetNo)        
+                print(recv)
                 self.beetle.sendDataToClient(recv)
-                global shoot
-                global count
-                if('GUN' in self.beetle.name):
-                    shoot = True
-                    #print(self.beetle.name+":Correct transmission:" + str(data[3]))
-                    
-                elif('VEST' in self.beetle.name):
-                    shoot = True
-                    #print(self.beetle.name+":Correct transmission:" + str(data[3]))
-                    # if(shoot ==True):
-                    #     count+=1
-                    #     shoot = False
-                    #     print(self.beetle.name+":Correct transmission:" + str(count))
-                    # else:
-                    #     print("double")
-                        
-                        
-                # if (self.count == 1):
-                #     self.count = 0
-
-                #     print("Retransmission successful")
-                #     self.countPacket += 1
-                #     self.sendACK(self.countPacket)
-
-                #elif (self.countPacket % 10 != 0 and self.count == 0 or self.countPacket == 0):
-                
                 self.seq.append(self.countPacket)
                 self.countPacket += 1
-                print(self.countPacket)
-                self.sendACK(self.countPacket)
-            #else:
-                #print(self.beetle.name +":" + str(data[3]) +":exists")
-                #self.sendACK(data[3])
-            #print(self.countPacket)
-            #print(data[3])
 
-            # else:
-            #     print(self.countPacket)
-            #     print(self.count)
-            #     print(self.countPacket % 5)
-            #     self.sendACK(self.countPacket-1)
-            #     self.count = 1
-            #     print("sending wrong synack")
-                # self.countPacket+=1
-                # self.seq.append(self.countPacket)
-                # print(self.countPacket)
-        # else:
-        #     if (data[3] in self.seq):
-        #         print(self.beetle.name+":Have already received the packet")
-        #     else:
-        #         print("Missing:" + str(self.countPacket))
+                self.sendACK(self.countPacket)
+                if(self.countPacket >= 255):
+                    self.seq.clear()
+                    self.countPacket = 0
+                    self.sendData.clear()
+            else:
+                print("Nope")
+        else:
+            if (packetNo in self.seq):
+                print(self.beetle.name+":Have already received the packet" + str(data[3]))
+                self.sendACK(packetNo+1)
+
 
     def handleNotification(self, cHandle, data):
 
         try:
-            #print(
-            #    "------------------------------------------------------------------------------")
-            #print(self.beetle.name)
-            #print(data)
-            # To handshake with the beetle
-            if (self.beetle.start == 0):
-                try:
-                    self.countPacket = 0
-                    SYNACK_values[1] = 0
-                    global count
-                    count = 0
-                    self.sendData = []
-                    #print(self.countPacket)
-                    if (self.verifyData(data) == 1):
-                        self.beetle.start = 1
-                        self.start = time.time()
-                        self.beetle.characteristic.write(SYNACK)
-                        self.type = data[1]
-                        self.retrPacket += 1
-                except Exception as e:
-                    print(self.beetle.name + str(e))
+            print(data)
+            if('vest' in self.beetle.name or 'gun' in self.beetle.name):
+                print(self.beetle.name)
+                print(data)
 
-            else:
-                
-                #print(data)
-                self.flag = True
-                if (self.verifyData(list(data)) == True):
+            if (self.verifyData(list(data)) == True):
+
+                if(self.beetle.started == 0):
+                    self.beetle.started = 1
+                    self.seq.clear()
+                    self.sendData.clear()
+                    self.countPacket = 0
+                    print("Send synack")
+                    self.beetle.characteristic.write(SYNACK)
+                    self.fragmented.clear()
+                else:
+
                     self.processData(data)
                     self.retrPacket += 1
 
+            else:
+
+                if (len(self.buffer) == 0):
+                    self.buffer.extend(data)
+                    if (self.header in self.buffer):
+
+                        # Find the header and shift it to the front of the buffer
+                        while (self.buffer[0] != self.header):
+                            #print("shifting")
+                            self.buffer.pop(0)
+
+                        if (self.retrPacket > 0):
+
+                            self.retrPacket -= 1
+
                 else:
-                    #print(self.beetle.name+":"+str(data))
-                    # print(data[0])
-                    # print(data[1])
-                    # print(len(data))
-                    if (len(self.buffer) == 0):
-                        self.buffer.extend(data)
-                        #print(self.buffer)
-                        if (self.header in self.buffer):
-                            #print(self.buffer)
-                            # Find the header and shift it to the front of the buffer
-                            while (self.buffer[0] != self.header):
-                                #print("shifting")
-                                self.buffer.pop(0)
+                    self.buffer.extend(list(data))
+                    #print("Extended Buffer:"+str(self.buffer))
+                    if (len(self.buffer) >= 20):
+                        # Start byte of the next packet
+                        if (self.header in self.buffer[1:]):
+                            # Find the index of the next packet
+                            newIndex = self.buffer[1:].index(
+                                self.header) + 1
+                        else:
+                            newIndex = 20
+                        # Obtain the fragmented data
+                        fragmented = self.buffer[:newIndex].copy()
+                        #print("Fragmented Data" + str(fragmented))
 
-                            if (self.retrPacket > 0):
-                                # The previous packet is being discarded since its not retrievable
-                                self.retrPacket -= 1
-                            #print(self.buffer)
-                            # print("------------------------------------------------------------------------------")
-                        # Do not append any bytes if the header is not present
-
-                    else:
-                        self.buffer.extend(list(data))
-                        #print("Extended Buffer:"+str(self.buffer))
-                        if (len(self.buffer) >= 20):
-                            # Start byte of the next packet
-                            if (self.header in self.buffer[1:]):
-                                # Find the index of the next packet
-                                newIndex = self.buffer[1:].index(
-                                    self.header) + 1
+                        # Extract the data if it satisfies the checksum criteria
+                        if (self.verifyData(fragmented)):
+                            
+                            if(self.beetle.started == 0):
+                                print("Recovered Handshake")
+                                self.beetle.started = 1
+                                self.beetle.characteristic.write(SYNACK)
+                                self.fragmented.clear()
                             else:
-                                newIndex = 20
-                            # Obtain the fragmented data
-                            fragmented = self.buffer[:newIndex].copy()
-                            #print("Fragmented Data" + str(fragmented))
 
-                            # Extract the data if it satisfies the checksum criteria
-                            if (self.verifyData(fragmented)):
                                 self.processData(bytes(fragmented))
-                               
-                                if ('IMU' in self.beetle.name):
-                                    recv = unpack(
+                                recv = unpack(
                                         'HHHHHH', bytes(fragmented)[3:15])
-                                    self.beetle.sendDataToClient(recv)
-                                else:
-                                    self.seq.append(fragmented[3])
-
-                                    self.beetle.sendDataToClient(fragmented)
-                                    if (fragmented[3] == self.countPacket):
-                                        self.countPacket += 1
-                                        self.sendACK(self.countPacket)
-                                    #else:
-                                        #print(self.countPacket)
-                                        #print(fragmented[3])
 
                                 self.retrPacket += 1
-                            else:
-                                self.retrPacket -= 1
+                        else:
+                            self.retrPacket -= 1
 
-                            fragmented.clear()
-                            self.shiftBuffer(newIndex)
+                        fragmented.clear()
+                        self.shiftBuffer(newIndex)
 
-                        if (len(self.buffer) > 50):
-                            #print("Length of Buffer is too large")
-                            # print(self.buffer)
-                            self.buffer.clear()
+                    if (len(self.buffer) > 50):
+                        self.buffer.clear()
 
         except Exception as e:
             print(self.beetle.name + str(e))
 
 
-def connect(name):
 
-    addr = Addresses[name]
-    print(addr)
-    print("start")
-    connect = 0
-    attempts = 5
-    while (connect == 0):
-        print(name + ":Trying to connect")
-        try:
-            currentBeetle = btle.Peripheral(addr)
-            #currentBeetle.connect(addr)
-
-            print("Device Connected")
-            connect = 1
-        except Exception as e:
-
-            time.sleep(2)
-            attempts -= 1
-
-    # acquiring the services and characteristics of the beetle
-    initialise = 0
-
-    while (connect == 1 and initialise == 0):
-        try:
-
-            service = currentBeetle.getServiceByUUID('dfb0')
-            characteristic = service.getCharacteristics()[0]
-            beetle = Device(addr, currentBeetle, service, characteristic,
-                            queue, name)
-            currentBeetle.withDelegate(MyDelegate(beetle))
-            initialise = 1
-            print("initialised")
-
-        except Exception as e:
-            print(e)
-            initialise = 0
-    devices.append(beetle)
-
-
-def start(beetle):
-
-    play = True
-    count = 0
-    print("start")
-    while play == True:
-        try:
-            if beetle.disconnect == 1:
-                try:
-                    print("connecting")
-                    beetle.peripheral.connect(beetle.ADDRESS)
-                    beetle.disconnect = 0
-
-                    print("Reconnected")
-                except Exception as e:
-                    print(e)
-                    # print("disconnected")
-                    count += 1
-                    time.sleep(1)
-
-            else:
-
-                while beetle.start == 0:
-                    beetle.characteristic.write(SYN)
-                    #beetle.handShakeWithBeetle()
-                    if(beetle.peripheral.waitForNotifications(4.0)==True and beetle.start == 1):
-                        print("Successful")
-                    
-                    else:
-                        #print(beetle.characteristic.read())
-                        print("Unsuccessful")
-                        # beetle.start = 1
-                        # beetle.characteristic.write(SYNACK)
-                        # while True:
-                        #     #beetle.peripheral.waitForNotifications(1.0)
-                        #     print(beetle.characteristic.read())
-                        
-
-                beetle.peripheral.waitForNotifications(1.0)                 
-                    # if('IMU' in beetle.name):
-                    #      print("Loss")
-                    #      count = 5
-                    #      while (beetle.disconnect == 0):
-                    #          try:
-                    #             beetle.peripheral.disconnect()
-                    #             beetle.disconnect = 1
-                    #             beetle.start = 0
-                    #             print("successfull")
-                    #             time.sleep(3)
-                    #          except Exception as e:
-                    #             pass
-
-
-        except btle.BTLEDisconnectError as c:
-            print(beetle.name + ":disconnected")
-            beetle.disconnect = 1
-            beetle.start = 0
-
-        except Exception as e:
-            
-            print(e)
-
-    print("End of transmission")
-    beetle.peripheral.disconnect()
-
-
-def firstHandShake(beetle):
-
-
-    while beetle.start == 0:
-        try:
-            if beetle.disconnect == 1:
-                try:
-                    beetle.peripheral.connect(beetle.ADDRESS)
-                    beetle.disconnect = 0
-
-                    print("Reconnected")
-                except Exception as e:
-                    print(e)
-
-                    time.sleep(1)
-
-            else:
-
-                while beetle.start == 0 and beetle.disconnect == 0:
-                    beetle.characteristic.write(SYN)
-                    #beetle.handShakeWithBeetle()
-                    if(beetle.peripheral.waitForNotifications(4.0)==True and beetle.start == 1):
-                        print("Successful")
-                    
-                    else:
-                        print("Unsuccessful")
-
-
-              
-
-        except btle.BTLEDisconnectError as c:
-            print(beetle.name + ":disconnected")
-            beetle.disconnect = 1
-            beetle.start = 0
-
-        except Exception as e:
-           
-            print(e)
-            time.sleep(2)
-
- 
-  
 
 # connecting to ultra96
-class UltraClient(threading.Thread):
+class UltraClient(Process):
     def __init__(self, user, passw,port,queue):
+        super().__init__()
         self.ip_addr = '192.168.95.244'
         self.buff_size = 256
         self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.user = user
         self.passw = passw
         self.is_start = threading.Event()
-        self.queue = queue
+        # self.queue = queue
         self.port = port
-
+        self.value='ULTRA96'
+        self.count = 0
     # sshtunneling into sunfire
     def start_tunnel(self):
         # open tunnel to sunfire
         tunnel1 = sshtunnel.open_tunnel(
             # host for sunfire at port 22
-            ('stu.comp.nus.edu.sg', 22),
+            ('sunfire.comp.nus.edu.sg', 22),
+            #('stu.comp.nus.edu.sg', 22),
             # ultra96 address
             remote_bind_address = ('192.168.95.244', 22),
             ssh_username = self.user,
             ssh_password = self.passw,
             block_on_close = False
             )
+        print("Tunnel initialised")
         tunnel1.start()
         
         print('[Tunnel Opened] Tunnel into Sunfire: ' + str(tunnel1.local_bind_port))
@@ -551,56 +394,118 @@ class UltraClient(threading.Thread):
             )
         tunnel2.start()
         print('[Tunnel Opened] Tunnel into Xilinx')
+        tunnel2.start()
+        print('[Tunnel Opened] Tunnel into Xilinx')
 
         return tunnel2.local_bind_address
 
+      
+
     # sending dummy data to ultra96
     def send(self, data):
+
         try:
             
             data_to_send = str(len(data)) + '_'+ data
-            print(data_to_send)
             self.client.sendall(data_to_send.encode("utf8"))
+
         except Exception as e:
-            print(e)
+            pass
+           
 
+    def run(self):
 
-def connectClient(ultra96):
-    try:
-        add = ultra96.start_tunnel()
-        ultra96.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        ultra96.client.connect(add)
-    except Exception as e:
-        print(e)
-    print(f"[ULTRA96 CONNECTED] Connected to Ultra96")
-    count = 0
+        self.connectClient()
+        mqtt_p = MQTTClient("visualizer17","test")   
+        mqtt_p.client.loop_start()
 
+        
+        print("Start server")
+        while True:
+            try:
+                if mqttQueue.qsize() > 0:
+                    msg = mqttQueue.get()
+                    print("Should pulish: {}".format(msg))
+                    mqttQueueP.put(msg)
+                    mqtt_p.publish()
+            except Exception as e:
+                print("\033[31mProblem with MQTT at CLIENT: {}\033[0m".format(e))
+            try:
 
-def sendDataClient(ultra96):
-    print("Send to Client")
-    while True:
+                # data = self.queue.get()
+                if queue.qsize() > 0:
+                    data = queue.get()
+                    self.send(data)
+
+                
+            except ConnectionRefusedError:
+                print("connection refused")
+                self.is_start.clear()
+            except IOError as e:
+                print(str(e))
+                # break
+            except Exception as e:
+                print(e)
+                break
+
+    def connectClient(self):
         try:
-
-            data = ultra96.queue.get()
-
-            ultra96.send(data)
-
-            
-        except ConnectionRefusedError:
-            print("connection refused")
-            ultra96.is_start.clear()
-        except IOError as e:
-            print(str(e))
-            # break
+            print("Starting Tunnel")
+            add = self.start_tunnel()
+            self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client.connect(add)
         except Exception as e:
             print(e)
-            break
-
-    ultra96.client.close()
-    print("[CLOSED]")
+        print(f"[ULTRA96 CONNECTED] Connected to Ultra96")
+        count = 0
 
 
-def main():
+class MQTTClient():
+    def __init__(self, topic, client_name):
+        self.topic = topic 
+        self.client = mqtt.Client(client_name,clean_session=False)
+        self.client.connect('test.mosquitto.org')
+        self.client.subscribe(self.topic)
+        self.value = 'MQTT'
+
+    def stop(self):
+        self.client.unsubscribe()
+        self.client.loop_stop()
+        self.client.disconnect()
+
+
+    def publish(self):
+        try:
+            if mqttQueueP.qsize() > 0:
+                device, status = mqttQueueP.get()
+                print(device)
+                print(status)
+                currentKey = 'p'+str(Player)
+                MQTT_DATA = {
+                currentKey: {"imu": "","gun": "","vest": ""},
+                }
+                print(status)
+                print("Send")
+                if(status == 'DC'):
+                    if(device not in disconnectDevices):
+                        disconnectDevices.append(device)
+
+                else:
+                    disconnectDevices.remove(device)
+                print(disconnectDevices)
+                for dev in disconnectDevices:
+                    MQTT_DATA[currentKey][dev] = 'no'
+                        
+                
+                message = json.dumps(MQTT_DATA)
+                print("\033[33m PUBLISHED TO MQTT: {}\033[0m".format(message))
+                res,num = self.client.publish(self.topic, message, qos = 1)
+                print(res)
+        except Exception as e:
+            print("mqtt error")
+            print(e)
+
+if __name__ == '__main__':
 
     if len(sys.argv) != 4:
         print("input sunfire username and password, port")
@@ -609,32 +514,23 @@ def main():
     user = sys.argv[1]
     passw = sys.argv[2]
     port = int(sys.argv[3])
-
-    ultra96 = UltraClient(user, passw, port,queue)
- 
     
-    connectClient(ultra96)
+    ultra96 = UltraClient(user, passw, port,queue)
 
-    for x in Addresses.keys():
-        connect(x)
+    for dev in Addresses:
+        device = Device(Addresses[dev],queue,dev)
+        devices.append(device)
+    print("Initialised Devices")
 
-    for device in devices:
-       firstHandShake(device)
-
-
+    
     try:
-
-
-        with ThreadPoolExecutor() as ex:
-            results = ex.map(start, devices)
-            ex.submit(sendDataClient(ultra96))
+        
+        for device in devices:
+            print(device)
+            device.start()
+        ultra96.start()
 
     except Exception as e:
         print(repr(e))
 
 
-if __name__ == '__main__':
-    main()
-
-# commands to find port sudo lsof -i -P -n | grep 8086
-# sudo kill -i <pid>
